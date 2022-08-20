@@ -138,4 +138,125 @@ public class GrammarTests extends AutumnTestFixture {
     }
 
     // ---------------------------------------------------------------------------------------------
+    //  EXTENSION TESTS
+    // ---------------------------------------------------------------------------------------------
+
+    @Test public void testArrayBinary() {
+        /*
+         *  Already part of the Grammar of Sigh language
+         */
+        rule = grammar.expression;
+
+        Object testArray = new ArrayLiteralNode(null, asList(intlit(1), intlit(2), intlit(3)));
+
+        successExpect("[1,2,3] + 1", new BinaryExpressionNode(null, testArray, ADD     , intlit(1)));
+        successExpect("1 + [1,2,3]", new BinaryExpressionNode(null, intlit(1), ADD   , testArray));
+        successExpect("[1,2,3] - 1", new BinaryExpressionNode(null, testArray, SUBTRACT, intlit(1)));
+        successExpect("[1,2,3] * 1", new BinaryExpressionNode(null, testArray, MULTIPLY, intlit(1)));
+        successExpect("[1,2,3] / 1", new BinaryExpressionNode(null, testArray, DIVIDE  , intlit(1)));
+
+        successExpect("[1,2,3] + [1,2,3]", new BinaryExpressionNode(null, testArray, ADD     , testArray));
+        successExpect("[1,2,3] - [1,2,3]", new BinaryExpressionNode(null, testArray, SUBTRACT, testArray));
+        successExpect("[1,2,3] * [1,2,3]", new BinaryExpressionNode(null, testArray, MULTIPLY, testArray));
+        successExpect("[1,2,3] / [1,2,3]", new BinaryExpressionNode(null, testArray, DIVIDE  , testArray));
+
+    }
+
+    @Test public void testForStmt(){
+        /*
+         *  New grammar defining "for loop"
+         */
+        rule = grammar.statement;
+
+        ExpressionStatementNode printExpr = new ExpressionStatementNode(null, new FunCallNode(null,
+            new ReferenceNode(null, "print"), asList(new ReferenceNode(null, "i"))));
+
+        successExpect("for i: Int in [1,2,3] { print(i); } ",
+            new ForEachNode(null,
+                new ForEachVarNode(null,"i", new SimpleTypeNode(null, "Int")),
+                new ArrayLiteralNode(null, asList(intlit(1), intlit(2), intlit(3))),
+                new BlockNode(null, asList(printExpr))
+            ));
+
+        successExpect("for var i: Int = 0 do i + 1 until i > 10 { print(i); } ",
+            new ForNode(null,
+                new VarDeclarationNode(null, "i", new SimpleTypeNode(null, "Int"), intlit(0)),
+                new BinaryExpressionNode(null, new ReferenceNode(null, "i"), ADD    , intlit(1 )),
+                new BinaryExpressionNode(null, new ReferenceNode(null, "i"), GREATER, intlit(10)),
+                new BlockNode(null, asList(printExpr))
+        ));
+
+        successExpect("for var i: Int = 0 do i + 1 { print(i); } ",
+            new ForNode(null,
+                new VarDeclarationNode(null, "i", new SimpleTypeNode(null, "Int"), intlit(0)),
+                new BinaryExpressionNode(null, new ReferenceNode(null, "i"), ADD    , intlit(1 )),
+                new ReferenceNode(null, "false"),
+                new BlockNode(null, asList(printExpr))
+        ));
+    }
+
+    @Test public void testArrayAccessExtend(){
+        rule = grammar.expression;
+
+        successExpect("[[1],[2],[3]][2][0]",
+            new ArrayAccessNode(null,
+                new ArrayAccessNode(null,
+                    new ArrayLiteralNode(null,
+                        asList(
+                            new ArrayLiteralNode(null,asList(intlit(1))),
+                            new ArrayLiteralNode(null,asList(intlit(2))),
+                            new ArrayLiteralNode(null,asList(intlit(3)))
+                        )
+                    ),
+                    intlit(2)
+                ),
+                intlit(0)
+            )
+        );
+
+        successExpect("i + 1 : s * 2",
+            new RangeExpressionNode(null,
+                new BinaryExpressionNode(null, new ReferenceNode(null, "i"), ADD, intlit(1)),
+                new BinaryExpressionNode(null, new ReferenceNode(null, "s"), MULTIPLY, intlit(2))
+            )
+        );
+
+        successExpect("[1,2,3][0:2]",
+            new ArrayAccessNode(null,
+                new ArrayLiteralNode(null, asList(intlit(1),intlit(2),intlit(3))),
+                new RangeExpressionNode(null, intlit(0),intlit(2))
+            )
+        );
+    }
+
+    @Test public void textLengthHint(){
+        rule = grammar.statement;
+
+        successExpect("var a: Int[] = [0,0,0,0]",
+            new VarDeclarationNode(null,"a",
+                new ArrayTypeNode(null, new SimpleTypeNode(null, "Int"), null),
+                new ArrayLiteralNode(null,asList(intlit(0),intlit(0),intlit(0),intlit(0)))
+            )
+        );
+
+        successExpect("var a: Int[4] = [0,0,0,0]",
+            new VarDeclarationNode(null,"a",
+                new ArrayTypeNode(null, new SimpleTypeNode(null, "Int"), intlit(4)),
+                new ArrayLiteralNode(null,asList(intlit(0),intlit(0),intlit(0),intlit(0)))
+            )
+        );
+
+        ExpressionNode array_00 =  new ArrayLiteralNode(null,asList(intlit(0),intlit(0)));
+
+        successExpect("var a: Int[2][4] = [[0,0],[0,0],[0,0],[0,0]]",
+            new VarDeclarationNode(null,"a",
+                new ArrayTypeNode(null,
+                    new ArrayTypeNode(null, new SimpleTypeNode(null, "Int"), intlit(2)),
+                    intlit(4)
+                ),
+                new ArrayLiteralNode(null,asList(array_00,array_00,array_00,array_00))
+            )
+        );
+        // TODO the order of lengthHint declaration is maybe counter-intuitive ?
+    }
 }

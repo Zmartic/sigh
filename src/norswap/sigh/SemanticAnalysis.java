@@ -121,6 +121,7 @@ public final class SemanticAnalysis
         walker.register(FunCallNode.class,              PRE_VISIT,  analysis::funCall);
         walker.register(UnaryExpressionNode.class,      PRE_VISIT,  analysis::unaryExpression);
         walker.register(BinaryExpressionNode.class,     PRE_VISIT,  analysis::binaryExpression);
+        walker.register(RangeExpressionNode.class,      PRE_VISIT,  analysis::rangeExpression); // new
         walker.register(AssignmentNode.class,           PRE_VISIT,  analysis::assignment);
 
         // types
@@ -131,6 +132,7 @@ public final class SemanticAnalysis
         walker.register(RootNode.class,                 PRE_VISIT,  analysis::root);
         walker.register(BlockNode.class,                PRE_VISIT,  analysis::block);
         walker.register(VarDeclarationNode.class,       PRE_VISIT,  analysis::varDecl);
+        walker.register(ForEachVarNode.class,           PRE_VISIT,  analysis::forEachVarDecl);
         walker.register(FieldDeclarationNode.class,     PRE_VISIT,  analysis::fieldDecl);
         walker.register(ParameterNode.class,            PRE_VISIT,  analysis::parameter);
         walker.register(FunDeclarationNode.class,       PRE_VISIT,  analysis::funDecl);
@@ -144,6 +146,8 @@ public final class SemanticAnalysis
         walker.register(ExpressionStatementNode.class,  PRE_VISIT,  node -> {});
         walker.register(IfNode.class,                   PRE_VISIT,  analysis::ifStmt);
         walker.register(WhileNode.class,                PRE_VISIT,  analysis::whileStmt);
+        walker.register(ForNode.class,                  PRE_VISIT,  analysis::forStmt); // new
+        walker.register(ForEachNode.class,              PRE_VISIT,  analysis::forEachStmt); // new
         walker.register(ReturnNode.class,               PRE_VISIT,  analysis::returnStmt);
 
         walker.registerFallback(POST_VISIT, node -> {});
@@ -274,6 +278,12 @@ public final class SemanticAnalysis
                     r.set(0, funType.paramTypes[(int) r.get(1)]);
                 });
             }
+            else if (context instanceof ForEachNode) {
+                R.rule(node, "type")
+                .by(r -> {
+                    r.error("For loop cannot iterate over an empty array", node);
+                });
+            }
             return;
         }
 
@@ -375,16 +385,27 @@ public final class SemanticAnalysis
         .using(node.index, "type")
         .by(r -> {
             Type type = r.get(0);
-            if (!(type instanceof IntType))
+            if (!(type instanceof IntType)) {
+                if (type instanceof ArrayType) {
+                    if (!(((ArrayType) type).componentType instanceof IntType))
+                        r.error("Multi-indexing an array using a non-Int-valued expression", node.index);
+                    return;
+                }
                 r.error("Indexing an array using a non-Int-valued expression", node.index);
+            }
         });
 
         R.rule(node, "type")
-        .using(node.array, "type")
+        .using(node.array.attr("type"), node.index.attr("type"))
         .by(r -> {
             Type type = r.get(0);
+            Type index = r.get(1);
+
             if (type instanceof ArrayType)
-                r.set(0, ((ArrayType) type).componentType);
+                if(index instanceof ArrayType)
+                    r.set(0, type);
+                else
+                    r.set(0, ((ArrayType) type).componentType);
             else
                 r.error("Trying to index a non-array expression of type " + type, node);
         });
@@ -500,22 +521,66 @@ public final class SemanticAnalysis
 
     // ---------------------------------------------------------------------------------------------
 
-    private void binaryArithmetic (Rule r, BinaryExpressionNode node, Type left, Type right)
-    {
-        if (left instanceof IntType)
-            if (right instanceof IntType)
-                r.set(0, IntType.INSTANCE);
-            else if (right instanceof FloatType)
-                r.set(0, FloatType.INSTANCE);
-            else
-                r.error(arithmeticError(node, "Int", right), node);
-        else if (left instanceof FloatType)
-            if (right instanceof IntType || right instanceof FloatType)
-                r.set(0, FloatType.INSTANCE);
-            else
-                r.error(arithmeticError(node, "Float", right), node);
+    private void binaryArithmetic (Rule r, BinaryExpressionNode node, Type left, Type right){
+        Type type;
+        // -- array type checking --
+        if (left instanceof ArrayType) {
+            ArrayType aLeft = (ArrayType) left;
+            if (right instanceof ArrayType) {
+                ArrayType aRight = (ArrayType) right;
+                type = ArithmeticTypeCompute(aLeft.innerMostType, aRight.innerMostType);
+                if(type != null){
+                    int dim = Math.max(aLeft.dimension,aRight.dimension);
+                    type = createArrayType(dim,type);
+                }
+            }
+            else {
+                type = ArithmeticTypeCompute(aLeft.innerMostType, right);
+                if (type != null)
+                    type = createArrayType(aLeft.dimension,type);
+            }
+        }
+        else if (right instanceof ArrayType) {
+            ArrayType aRight = (ArrayType) right;
+            type = ArithmeticTypeCompute(left, aRight.innerMostType);
+            if (type != null)
+                type = createArrayType(aRight.dimension,type);
+        }
+        // -- primitive only --
         else
-            r.error(arithmeticError(node, left, right), node);
+            type = ArithmeticTypeCompute(left, right);
+
+
+        if (type != null) {
+            r.set(0, type);
+            return;
+        }
+        r.error(arithmeticError(node, left, right), node);
+    }
+
+    private Type createArrayType(int dim, Type compType)
+    {
+        // factory for ArrayType.class
+        Type type = new ArrayType(compType);
+        for(int i = 1; i < dim; i++)
+            type =  new ArrayType(type);
+        return type;
+    }
+
+    private Type ArithmeticTypeCompute (Type left, Type right)
+    {
+        // return the type for an arithmetic operation between left and right
+        if (left instanceof IntType) {
+            if (right instanceof IntType)
+                return IntType.INSTANCE;
+            if (right instanceof FloatType)
+                return FloatType.INSTANCE;
+            return null;
+        }
+        if (left instanceof FloatType &&
+            (right instanceof IntType || right instanceof FloatType) )
+                return FloatType.INSTANCE;
+        return null;
     }
 
     // ---------------------------------------------------------------------------------------------
@@ -561,6 +626,32 @@ public final class SemanticAnalysis
         if (!(right instanceof BoolType))
             r.errorFor("Attempting to perform binary logic on non-boolean type: " + right,
                 node.right);
+    }
+
+    // ---------------------------------------------------------------------------------------------
+
+    private void rangeExpression (RangeExpressionNode node)
+    {
+        R.set(node, "type", new ArrayType(IntType.INSTANCE));
+
+        // -- check left operand type --
+        R.rule()
+        .using(node.left, "type")
+        .by(r -> {
+            Type type = r.get(0);
+            if(!(type instanceof IntType))
+                r.errorFor("Incompatible left operand type for range operation. expected: Int actual: " + type,
+                    node.left);
+        });
+        // -- check right operand type --
+        R.rule()
+        .using(node.right, "type")
+        .by(r -> {
+            Type type = r.get(0);
+            if(!(type instanceof IntType))
+                r.errorFor("Incompatible right operand type for range operation. expected: Int actual: " + type,
+                    node.right);
+        });
     }
 
     // ---------------------------------------------------------------------------------------------
@@ -627,6 +718,18 @@ public final class SemanticAnalysis
         R.rule(node, "value")
         .using(node.componentType, "value")
         .by(r -> r.set(0, new ArrayType(r.get(0))));
+
+        // -- check lengthHint type --
+        if(node.lengthHint != null) {
+            R.rule()
+            .using(node.lengthHint, "type")
+            .by(r -> {
+                Type type = r.get(0);
+                if (!(type instanceof IntType))
+                    r.errorFor("Incompatible type for array length hinting. expected Int but got " + type,
+                        node.lengthHint);
+            });
+        }
     }
 
     // ---------------------------------------------------------------------------------------------
@@ -752,6 +855,18 @@ public final class SemanticAnalysis
 
     // ---------------------------------------------------------------------------------------------
 
+    private void forEachVarDecl(ForEachVarNode node)
+    {
+        scope.declare(node.name, node);
+        R.set(node, "scope", scope);
+
+        R.rule(node, "type")
+        .using(node.type, "value")
+        .by(Rule::copyFirst);
+    }
+
+    // ---------------------------------------------------------------------------------------------
+
     private void fieldDecl (FieldDeclarationNode node)
     {
         R.rule(node, "type")
@@ -850,6 +965,60 @@ public final class SemanticAnalysis
 
     // ---------------------------------------------------------------------------------------------
 
+    private void forStmt (ForNode node)
+    {
+        // check whether the condition is boolean typed
+        R.rule()
+        .using(node.condition, "type")
+        .by(r -> {
+            Type type = r.get(0);
+            if (!(type instanceof BoolType)) {
+                r.error("For statement with a non-boolean condition of type: " + type,
+                    node.condition);
+            }
+        });
+        // check whether the node.iterationRule is of the same type then node.iterator
+        R.rule()
+        .using(node.iterator.attr("type"), node.iterationRule.attr("type"))
+        .by(r -> {
+            Type expected = r.get(0);
+            Type actual = r.get(1);
+
+            if (!isAssignableTo(actual, expected))
+                r.error(format(
+                        "incompatible iteration rule type provided for iterator `%s`: expected %s but got %s",
+                        node.iterator.name, expected, actual),
+                    node.iterationRule);
+        });
+    }
+
+    // ---------------------------------------------------------------------------------------------
+
+    private void forEachStmt (ForEachNode node)
+    {
+        this.inferenceContext = node;
+
+        // check if the node.iterated is iterable
+        R.rule()
+        .using(node.iterator.attr("type"), node.iterated.attr("type"))
+        .by( r -> {
+            Type iterType = r.get(0);
+            Type arrayType = r.get(1);
+
+            if(arrayType instanceof ArrayType) {
+                Type actual = ((ArrayType) arrayType).componentType;
+                if(!isAssignableTo(actual,iterType))
+                    r.error(format("incompatible component type provided for iterator %s: expected %s but got %s", node.iterator.name, iterType, actual),
+                        node.iterated);
+                return;
+            }
+            r.error("For loop received non-iterable type: " + arrayType,
+                node.iterated);
+        });
+    }
+
+    // ---------------------------------------------------------------------------------------------
+
     private void returnStmt (ReturnNode node)
     {
         R.set(node, "returns", true);
@@ -857,6 +1026,8 @@ public final class SemanticAnalysis
         FunDeclarationNode function = currentFunction();
         if (function == null) // top-level return
             return;
+
+        R.set(node, "type", function.returnType); // needed to check length hinting of return type
 
         if (node.expression == null)
             R.rule()

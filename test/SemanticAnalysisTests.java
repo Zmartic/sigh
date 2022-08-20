@@ -97,8 +97,8 @@ public final class SemanticAnalysisTests extends UraniumTestFixture
 
         failureInputWith("return 2 + true", "Trying to add Int with Bool");
         failureInputWith("return true + 2", "Trying to add Bool with Int");
-        failureInputWith("return 2 + [1]", "Trying to add Int with Int[]");
-        failureInputWith("return [1] + 2", "Trying to add Int[] with Int");
+        //failureInputWith("return 2 + [1]", "Trying to add Int with Int[]");
+        //failureInputWith("return [1] + 2", "Trying to add Int[] with Int");
     }
 
     // ---------------------------------------------------------------------------------------------
@@ -301,4 +301,86 @@ public final class SemanticAnalysisTests extends UraniumTestFixture
     }
 
     // ---------------------------------------------------------------------------------------------
+
+    @Test public void testArrayBinary() {
+        successInput("var i: Int[] = [1,2,3] + 1");
+        successInput("var i: Int[] = [1,2,3] - 1");
+        successInput("var i: Int[] = [1,2,3] * 1");
+        successInput("var i: Int[] = [1,2,3] / 1");
+
+        successInput("var i: Int[] = 1 + [1,2,3]");
+        successInput("var i: Int[] = 1 - [1,2,3]");
+        successInput("var i: Int[] = 1 * [1,2,3]");
+        successInput("var i: Int[] = 1 / [1,2,3]");
+
+        successInput("var i: Int[] = [1,2,3] + [1,2,3]");
+        successInput("var i: Int[] = [1,2,3] - [1,2,3]");
+        successInput("var i: Int[] = [1,2,3] * [1,2,3]");
+        successInput("var i: Int[] = [1,2,3] / [1,2,3]");
+
+        successInput("var i: Int[][] = [[1,1],[2,2],[3,3]] + 1");
+        successInput("var i: Int[][] = [[1,1],[2,2],[3,3]] + [1,0,1]");// result = [[2,2],[0,0],[4,4]]
+
+        failureInputWith("var i: Int[] = [1,2,3] + null",
+            "Trying to add Int[] with Null");
+        successInput("var i: String = [1,2,3] + \"h\"");
+        failureInputWith("var i: String[] = [\"hello\",\"world\"] + 1",
+            "Trying to add String[] with Int");
+    }
+
+    @Test public void testForStmt()
+    {
+        successInput("for var i: Int = 0 do i + 1 until i > 10 { print(i + \"\"); } ; return");
+        successInput("for var i: Int = 0 do i + 1 { if i > 10 { return; } } ;");
+
+        failureInputWith("for var i: Int = 0 do i + \"1\" until i > 10 { print(i + \"\"); } ; return",
+            "incompatible iteration rule type provided for iterator `i`: expected Int but got String");
+        failureInputWith("for var i: Int = 0 do i + 1 until i + 10 { print(i + \"\"); } ; return",
+            "For statement with a non-boolean condition of type: Int");
+
+        successInput("var sum: Int = 0 ; for i: Int in [1,5,9,6] { sum = sum + i; } ; print(\"sum = \"+sum) ;");
+        successInput("for s: String in [\"hello\",\" \",\"world\"] { print(s); } ;");
+
+        failureInputWith("for i: Int in [1,2,3,4] { print(i); } ;",
+            "incompatible argument provided for argument 0: expected String but got Int");
+        failureInputWith("for i: String in [1,2,3,4] { print(i); } ;",
+            "incompatible component type provided for iterator i: expected String but got Int");
+        failureInputWith("for s: String in \"hello\" { print(s); } ;",
+            "For loop received non-iterable type: String");
+        failureInputWith("for s: String in [] { print(s); } ;",
+            "For loop cannot iterate over an empty array");
+    }
+
+    @Test public void testRangeExpr()
+    {
+        successInput("var a: Int[] = [0,0,0,0] ; a[1:3] = [1,1] * 5 ;");
+        // todo: don't allow a[1:3][0]
+
+        successInput("var a: Int[] = [1,2,3,4] ; var b: Int[] = a[0:2] + b[2:4] ;");
+        successInput("var a: Int[] = [1,2,3,4] ; var reverse_a: Int[] = a[-1:0] ;"); // TODO nop
+        successInput("var a: Int[] = [1,2,3,4] ; var empty_a: Int[] = a[1:1] ;");
+
+        successInput("var a: Int[] = 0 : 10 ;");
+        successInput("var even_a: Int[] = (0 : 5) * 2 ;");
+
+        failureInputWith("var a: Int[] = [0,0,0,0] ; var b: Int[] = a[\"1\":3]",
+            "Incompatible left operand type for range operation. expected: Int actual: String");
+        failureInputWith("var a: Int[] = [0,0,0,0] ; var b: Int[] = a[1:\"3\"]",
+            "Incompatible right operand type for range operation. expected: Int actual: String");
+        failureInputWith("var a: Int[] = [0,0,0,0] ; var b: Int[] = a[1:3.0]",
+            "Incompatible right operand type for range operation. expected: Int actual: Float");
+        failureInputWith("var a: Int[] = [0,0,0,0] ; var b: Int[] = a[1:2:3]",
+            "Incompatible left operand type for range operation. expected: Int actual: Int[]");
+    }
+
+    @Test public void testLengthHint() {
+        successInput("var a: Int[4] = [0,0,0,0];");
+        successInput("var i: Int = 4 ; var a: Int[i] = [0,0,0,0];");
+        failureInputWith("var a: Int[\"four\"] = [0,0,0,0];",
+            "Incompatible type for array length hinting. expected Int but got String");
+        failureInputWith("var i: String = \"four\" ; var a: Int[i] = [0,0,0,0];",
+            "Incompatible type for array length hinting. expected Int but got String");
+
+        successInput("var a: Int[12] = [0,0,0,0];"); //cannot check until run time
+    }
 }

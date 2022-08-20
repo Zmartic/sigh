@@ -350,5 +350,119 @@ public final class InterpreterTests extends TestFixture {
 
     // ---------------------------------------------------------------------------------------------
 
+    @Test public void testForStmt()
+    {
+        rule = grammar.root;
+        check("for var i: Int = 1 do i + 1 until i > 5 { print(i + \"\"); }", null, "1\n2\n3\n4\n5\n");
+        check("var array: Int[] = [1,2,3,4,5] ; for i: Int in array { print(i + \"\"); }", null, "1\n2\n3\n4\n5\n");
+        check("var sum: Int = 0 ; for i: Int in [1,2,3,4,5] { sum = sum + i; if (i > 3) return sum; }", 10L);
+    }
+
+    // ---------------------------------------------------------------------------------------------
+
+    @Test public void testRange()
+    {
+        rule = grammar.root;
+        check("print((0:5) + \"\" );", null,"[0, 1, 2, 3, 4]\n");
+        check("print((2:6) + \"\" );", null,"[2, 3, 4, 5]\n");
+        check("print((2:2) + \"\" );", null,"[]\n");
+        check("print((6:2) + \"\" );", null,"[]\n");
+    }
+
+    // ---------------------------------------------------------------------------------------------
+
+    @Test public void testArrayAssign()
+    {
+        rule = grammar.root;
+        check("var a: Int[] = [0,0,0,0,0]; var idxs: Int[] = [1,2,3]; a[idxs] = [5,6,7]; print(a+\"\");", null,"[0, 5, 6, 7, 0]\n");
+        check("var a: Int[] = [0,0,0,0,0]; var idxs: Int[] = [3,1,2]; a[idxs] = [5,6,7]; print(a+\"\");", null,"[0, 6, 7, 5, 0]\n");
+        check("var a: Int[] = [0,0,0,0,0]; a[1:4] = [1,2,3]; print(a+\"\");", null,"[0, 1, 2, 3, 0]\n");
+        checkThrows("var a: Int[] = [0,0,0,0,0];" +
+                    "a[1:4] = [1];", // incompatible length
+                    ArrayIndexOutOfBoundsException.class);
+        checkThrows("var a: Int[] = [0,0,0,0,0];" +
+                    "a[1:2] = [1,2,3,4,5];", // incompatible length,
+                    ArrayIndexOutOfBoundsException.class);
+        checkThrows("var a: Int[] = [0,0,0,0,0];" +
+                    "a[1:1] = [];", // a[1:1] = empty selection = cannot be assigned
+                    NullPointerException.class);
+    }
+
+    // ---------------------------------------------------------------------------------------------
+
+    @Test public void testArrayBinary()
+    {
+        rule = grammar.root;
+        check("var a: Int[]   = [1,2,3];        var b: Int[]   = [1,1,2];       var c: Int[]   = a + b; print(c + \"\");",null,"[2, 3, 5]\n");
+        check("var a: Int[]   = [1,2,3];        var b: Float[] = [1.0,1.0,2.0]; var c: Float[] = a + b; print(c + \"\");",null,"[2.0, 3.0, 5.0]\n");
+        check("var a: Float[] = [1.0,2.0,3.0];  var b: Int[]   = [1,1,2];       var c: Float[] = a + b; print(c + \"\");",null,"[2.0, 3.0, 5.0]\n");
+        check("var a: Float[] = [1.0,2.0,3.0];  var b: Float[] = [1.0,1.0,2.0]; var c: Float[] = a + b; print(c + \"\");",null,"[2.0, 3.0, 5.0]\n");
+
+        check("var a: Int[]   = [1,2,3];       var b: Int[]   = a + 1;   print(b +\"\");",null,"[2, 3, 4]\n");
+        check("var a: Int[]   = [1,2,3];       var b: Float[] = a + 1.0; print(b +\"\");",null,"[2.0, 3.0, 4.0]\n");
+        check("var a: Float[] = [1.0,2.0,3.0]; var b: Float[] = a + 1;   print(b +\"\");",null,"[2.0, 3.0, 4.0]\n");
+        check("var a: Float[] = [1.0,2.0,3.0]; var b: Float[] = a + 1.0; print(b +\"\");",null,"[2.0, 3.0, 4.0]\n");
+
+        check("var a: Int[]   = [1,2,3]; var b: Int[] = a[0:2] + a[1:3]; print(b +\"\");",null,"[3, 5]\n");
+
+        check("var a: Int[][] = [[1,2,3],[4,5,6],[7,8,9]] + 1;       print(a +\"\");",null,"[[2, 3, 4], [5, 6, 7], [8, 9, 10]]\n");
+        check("var a: Int[][] = 1 + [[1,2,3],[4,5,6],[7,8,9]];       print(a +\"\");",null,"[[2, 3, 4], [5, 6, 7], [8, 9, 10]]\n");
+        check("var a: Int[][] = [[1,2,3],[4,5,6],[7,8,9]] + [1,0,2]; print(a +\"\");",null,"[[2, 3, 4], [4, 5, 6], [9, 10, 11]]\n");
+        check("var a: Int[][] = [1,0,2] + [[1,2,3],[4,5,6],[7,8,9]]; print(a +\"\");",null,"[[2, 3, 4], [4, 5, 6], [9, 10, 11]]\n");
+
+        checkThrows("var a: Int[] = [1,2,3];" +
+                    "var b: Int[] = [1,2];" +
+                    "var c: Int[] = a + b;", // incompatible length
+                    AssertionError.class);
+        checkThrows("var a: Int[][] = [[1,2,3],[4,5,6],[7,8,9]];" +
+                    "var b: Int[][] = [[1],[1],[1]];" +
+                    "var c: Int[] = a + b;", // incompatible length
+                    AssertionError.class);
+
+        checkThrows("var a: Int[] = [] + []", ArithmeticException.class);
+        checkThrows("var a: Int[] = [] + 1", ArithmeticException.class);
+        checkThrows("var a: Int[] = 1 + []", ArithmeticException.class);
+
+        checkThrows("var a: Int[][] = [[]]", AssertionError.class); // bug from Sigh: expected Int[][] but got Int[][][]
+
+    }
+
+    // ---------------------------------------------------------------------------------------------
+
+    @Test public void testLengthHinting()
+    {
+        rule = grammar.root;
+        check("var a: Int[4] = [1,2,3,4];",null);
+        check("var a: Int[2][4] = [[1,1],[2,2],[3,3],[4,4]];",null);
+
+        checkThrows("var a: Int[0] = []",
+            AssertionError.class); // incoherent length hint
+        checkThrows("var a: Int[-1] = [0,0,0];",
+            AssertionError.class); // incoherent length hint
+
+        check("var a: Int[][] = [];",null);
+        checkThrows("var a: Int[][1] = [];",
+                    AssertionError.class);       // array size expected 1 but got 0
+        checkThrows("var a: Int[1][] = [];",
+                    NullPointerException.class); // dimension of [] is too low, length hint cannot be checked
+
+        check("fun f(x:Int[3]): Int { return x[1] } ; return f([1,2,3])",2L);
+        checkThrows("fun f(x:Int[3]): Int { return x[1] } ; return f([1,2,3,4])",AssertionError.class);
+        checkThrows("fun f(x:Int[3]): Int { return x[1] } ; return f([])",AssertionError.class);
+
+        check("fun f(x:Int[]): Int[2] { return x } ; print( f([1,2]) + \"\" );", null, "[1, 2]\n");
+        checkThrows("fun f(x:Int[]): Int[2] { return x } ; return f([1,2,3]);", AssertionError.class);
+        checkThrows("fun f(x:Int[]): Int[2] { return x } ; return f([]);", AssertionError.class);
+
+        check("var ii: Int[][] = [[1],[2],[3]]; for i:Int[1] in ii { print(i + \"\"); }", null, "[1]\n[2]\n[3]\n");
+        checkThrows("var ii: Int[][] = [[1],[2],[3]]; for i:Int[12] in ii { print(i + \"\"); }", AssertionError.class);
+
+        // dumb exemple
+        check("for var i:Int[3] = [1,2,3] do i + 1 until i[2] > 4 { print( i[1] + \"\" ) }", null, "2\n3\n");
+        checkThrows("for var i:Int[4] = [1,2,3] do i + 1 until i[2] > 4 { print( i[1] + \"\" ) }", AssertionError.class);
+    }
+
+    // ---------------------------------------------------------------------------------------------
+
     // NOTE(norswap): Not incredibly complete, but should cover the basics.
 }

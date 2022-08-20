@@ -5,6 +5,7 @@ import norswap.sigh.scopes.DeclarationKind;
 import norswap.sigh.scopes.RootScope;
 import norswap.sigh.scopes.Scope;
 import norswap.sigh.scopes.SyntheticDeclarationNode;
+import norswap.sigh.types.ArrayType;
 import norswap.sigh.types.FloatType;
 import norswap.sigh.types.IntType;
 import norswap.sigh.types.StringType;
@@ -18,6 +19,7 @@ import java.util.Arrays;
 import java.util.HashMap;
 import java.util.Map;
 
+import static java.lang.String.format;
 import static norswap.utils.Util.cast;
 import static norswap.utils.Vanilla.coIterate;
 import static norswap.utils.Vanilla.map;
@@ -73,6 +75,7 @@ public final class Interpreter
         visitor.register(FunCallNode.class,              this::funCall);
         visitor.register(UnaryExpressionNode.class,      this::unaryExpression);
         visitor.register(BinaryExpressionNode.class,     this::binaryExpression);
+        visitor.register(RangeExpressionNode.class,      this::rangeExpression);
         visitor.register(AssignmentNode.class,           this::assignment);
 
         // statement groups & declarations
@@ -85,6 +88,9 @@ public final class Interpreter
         visitor.register(ExpressionStatementNode.class,  this::expressionStmt);
         visitor.register(IfNode.class,                   this::ifStmt);
         visitor.register(WhileNode.class,                this::whileStmt);
+        visitor.register(ForNode.class,                  this::forStmt);
+        visitor.register(ForEachVarNode.class,           this::forEachVarDecl);
+        visitor.register(ForEachNode.class,              this::forEachStmt);
         visitor.register(ReturnNode.class,               this::returnStmt);
 
         visitor.registerFallback(node -> null);
@@ -176,6 +182,32 @@ public final class Interpreter
                 && (leftType instanceof StringType || rightType instanceof StringType))
             return convertToString(left) + convertToString(right);
 
+        // -- Array operation handeler --
+        if(reactor.get(node,"type") instanceof ArrayType){
+            /* left: primitive ,right: array */
+            if(!(leftType  instanceof ArrayType)) {
+                ArrayType r = (ArrayType) rightType; // ensured by semantic
+                boolean floating = leftType instanceof FloatType || r.innerMostType instanceof FloatType;
+                return arrayPrimitiveFactMirror(node, floating, r.dimension, (Number) left, right);
+            }
+            /* left: array ,right: primitive */
+            if(!(rightType instanceof ArrayType)) {
+                ArrayType l = (ArrayType) leftType; // ensured by semantic
+                boolean floating = l.innerMostType instanceof FloatType || rightType instanceof FloatType;
+                return arrayPrimitiveFact(node, floating, l.dimension, left, (Number) right);
+            }
+            /* left: array ,right: array */
+            ArrayType l = (ArrayType) leftType;
+            ArrayType r = (ArrayType) rightType;
+            int dimLeft  = l.dimension;
+            int dimRight = r.dimension;
+            boolean floating = l.innerMostType instanceof FloatType || r.innerMostType instanceof FloatType;
+
+            if(dimLeft >= dimRight)
+                return arrayArrayFact(  node, floating, dimRight, dimLeft - dimRight, left, right);
+            return arrayArrayFactMirror(node, floating, dimLeft , dimRight - dimLeft, left, right);
+        }
+
         boolean floating = leftType instanceof FloatType || rightType instanceof FloatType;
         boolean numeric  = floating || leftType instanceof IntType;
 
@@ -188,7 +220,6 @@ public final class Interpreter
             case NOT_EQUALS:
                 return  leftType.isPrimitive() ? !left.equals(right) : left != right;
         }
-
         throw new Error("should not reach here");
     }
 
@@ -200,6 +231,107 @@ public final class Interpreter
         return isAnd
                 ? left && (boolean) get(node.right)
                 : left || (boolean) get(node.right);
+    }
+
+    // ---------------------------------------------------------------------------------------------
+
+    // I'm aware that this implementation is not elegante
+    private Object arrayArrayFact(BinaryExpressionNode node, boolean floating,
+        int loopAA, int loopAP, Object left, Object right)
+    {
+        /* assert( dim[left] >= dim[right] )
+         * loopAA = number of arrayArrayFact call
+         * loopAP = number of arrayPrimitiveFact call
+         * ---------------------------------
+         * res = left + right
+         *   ->
+         * res[i] = left[i] + right[i]
+         */
+        if(loopAA > 0){
+            Object[] l = (Object[]) left;
+            Object[] r = (Object[]) right;
+            if(l.length != r.length)
+                throw new PassthroughException(new AssertionError(
+                    format("Attempt to perform operation between incompatible arrays respectively of size %d and %d",l.length,r.length)));
+            if(l.length == 0)
+                throw new PassthroughException(new ArithmeticException("Attempting to perform an operation using empty arrays"));
+
+            Object[] res = new Object[l.length];
+            for(int i = 0; i < res.length; i++)
+                res[i] = arrayArrayFact(node, floating, loopAA-1, loopAP, l[i], r[i]);
+            return res;
+        }
+        return arrayPrimitiveFact(node, floating, loopAP, left, (Number) right);
+    }
+
+    private Object arrayArrayFactMirror(BinaryExpressionNode node, boolean floating,
+        int loopAA, int loopAP, Object left, Object right)
+    {
+        /* assert( dim[left] < dim[right] )
+         * loopAA = number of arrayArrayFact call
+         * loopAP = number of arrayPrimitiveFact call
+         * ---------------------------------
+         * res = left + right
+         *   ->
+         * res[i] = left[i] + right[i]
+         */
+        if(loopAA > 0){
+            Object[] l = (Object[]) left;
+            Object[] r = (Object[]) right;
+            if(l.length != r.length)
+                throw new PassthroughException(new AssertionError(
+                    format("Attempt to perform operation between incompatible arrays respectively of size %d and %d",l.length,r.length)));
+            if(l.length == 0)
+                throw new PassthroughException(new ArithmeticException("Attempting to perform an operation using empty arrays"));
+
+            Object[] res = new Object[l.length];
+            for(int i = 0; i < res.length; i++)
+                res[i] = arrayArrayFactMirror(node, floating, loopAA-1, loopAP, l[i], r[i]);
+            return res;
+        }
+        return arrayPrimitiveFactMirror(node, floating, loopAP, (Number) left, right);
+    }
+
+    private Object arrayPrimitiveFact(BinaryExpressionNode node, boolean floating,
+        int loopAP, Object left, Number right)
+    {
+        /* loopAP = number of arrayPrimitiveFact call
+         * ---------------------------------
+         * res = left + right
+         * ->
+         * res[i] = left[i] + right
+         */
+        if(loopAP > 0){
+            Object[] l = (Object[]) left;
+            if(l.length == 0)
+                throw new PassthroughException(new ArithmeticException("Attempting to perform an operation using an empty array"));
+            Object[] res = new Object[l.length];
+            for(int i = 0; i < res.length; i++)
+                res[i] = arrayPrimitiveFact(node, floating, loopAP-1, l[i], right);
+            return res;
+        }
+        return numericOp(node, floating, (Number) left, right);
+    }
+
+    private Object arrayPrimitiveFactMirror(BinaryExpressionNode node, boolean floating,
+        int loopAP, Number left, Object right)
+    {
+        /* loopAP = number of arrayPrimitiveFact call
+         * ---------------------------------
+         * res = left + right
+         * ->
+         * res[i] = left + right[i]
+         */
+        if(loopAP > 0){
+            Object[] r = (Object[]) right;
+            if(r.length == 0)
+                throw new PassthroughException(new ArithmeticException("Attempting to perform an operation using an empty array"));
+            Object[] res = new Object[r.length];
+            for(int i = 0; i < res.length; i++)
+                res[i] = arrayPrimitiveFactMirror(node, floating, loopAP-1, left, r[i]);
+            return res;
+        }
+        return numericOp(node, floating, left, (Number) right);
     }
 
     // ---------------------------------------------------------------------------------------------
@@ -257,6 +389,23 @@ public final class Interpreter
 
     // ---------------------------------------------------------------------------------------------
 
+    private Object[] rangeExpression (RangeExpressionNode node)
+    {
+        long left = get(node.left);
+        long right = get(node.right);
+        int size = (int) (right - left);
+        if(size <= 0)
+            return new Object[0]; // empty selection
+
+        Object[] range =  new Object[size];
+        for(int iter = 0; iter < size; iter++)
+            range[iter] = left + iter;
+
+        return range;
+    }
+
+    // ---------------------------------------------------------------------------------------------
+
     public Object assignment (AssignmentNode node)
     {
         if (node.left instanceof ReferenceNode) {
@@ -270,9 +419,33 @@ public final class Interpreter
         if (node.left instanceof ArrayAccessNode) {
             ArrayAccessNode arrayAccess = (ArrayAccessNode) node.left;
             Object[] array = getNonNullArray(arrayAccess.array);
-            int index = getIndex(arrayAccess.index);
+            Type type = reactor.get(arrayAccess.index, "type");
+
+            /* Simple Array Access */
+            if(!(type instanceof ArrayType)) {
+                int index = getIndex(arrayAccess.index);
+                try {
+                    return array[index] = get(node.right);
+                } catch (ArrayIndexOutOfBoundsException e) {
+                    throw new PassthroughException(e);
+                }
+            }
+            /* Mutliple Array Access */
+            int[] indexes = getIndexes(arrayAccess.index);
+            Object[] right = get(node.right);
+
+            if(indexes.length == 0)
+                throw new PassthroughException(new NullPointerException(
+                    "empty array access cannot be assigned"));
+            if(indexes.length != right.length)
+                throw new PassthroughException(new ArrayIndexOutOfBoundsException(
+                    format("Trying to assign an array of size %d to an array access of size %d",
+                           indexes.length, right.length)));
+
             try {
-                return array[index] = get(node.right);
+                for(int iter = 0; iter < indexes.length; iter++)
+                    array[indexes[iter]] = right[iter];
+                return array;
             } catch (ArrayIndexOutOfBoundsException e) {
                 throw new PassthroughException(e);
             }
@@ -297,12 +470,32 @@ public final class Interpreter
 
     private int getIndex (ExpressionNode node)
     {
-        long index = get(node);
-        if (index < 0)
-            throw new ArrayIndexOutOfBoundsException("Negative index: " + index);
-        if (index >= Integer.MAX_VALUE - 1)
-            throw new ArrayIndexOutOfBoundsException("Index exceeds max array index (2ˆ31 - 2): " + index);
-        return (int) index;
+        return checkInt(get(node));
+    }
+
+    // ---------------------------------------------------------------------------------------------
+
+    private int[] getIndexes (ExpressionNode node)
+    {
+        /*
+         * return the int[] value of node
+         */
+        Object[] obj = get(node);
+        int[] indexes = new int[obj.length];
+        for(int i = 0; i < obj.length; i++)
+            indexes[i] = checkInt((long) obj[i]) ;
+        return indexes;
+    }
+
+    // ---------------------------------------------------------------------------------------------
+
+    private int checkInt (long value)
+    {
+        if (value < 0)
+            throw new ArrayIndexOutOfBoundsException("Negative index: " + value);
+        if (value >= Integer.MAX_VALUE - 1)
+            throw new ArrayIndexOutOfBoundsException("Index exceeds max array index (2ˆ31 - 2): " + value);
+        return (int) value;
     }
 
     // ---------------------------------------------------------------------------------------------
@@ -329,8 +522,24 @@ public final class Interpreter
     private Object arrayAccess (ArrayAccessNode node)
     {
         Object[] array = getNonNullArray(node.array);
+        Type type = reactor.get(node.index,"type");
+
+        /* Simple Array Access */
+        if(!(type instanceof ArrayType)) {
+            try {
+                return array[getIndex(node.index)];
+            } catch (ArrayIndexOutOfBoundsException e) {
+                throw new PassthroughException(e);
+            }
+        }
+
+        /* Multiple Array Access */
+        int[] indexes = getIndexes(node.index);
+        Object[] res = new Object[indexes.length];
         try {
-            return array[getIndex(node.index)];
+            for(int iter = 0; iter < indexes.length; iter++)
+                res[iter] = array[indexes[iter]];
+            return res;
         } catch (ArrayIndexOutOfBoundsException e) {
             throw new PassthroughException(e);
         }
@@ -415,7 +624,10 @@ public final class Interpreter
 
         FunDeclarationNode funDecl = (FunDeclarationNode) decl;
         coIterate(args, funDecl.parameters,
-                (arg, param) -> storage.set(scope, param.name, arg));
+                (arg, param) -> { if(param.type instanceof ArrayTypeNode)
+                                      checkLength((ArrayTypeNode) param.type, arg);
+                                  storage.set(scope, param.name, arg);
+        });
 
         try {
             get(funDecl.block);
@@ -487,6 +699,60 @@ public final class Interpreter
 
     // ---------------------------------------------------------------------------------------------
 
+    private Void forStmt (ForNode node)
+    {
+        Scope scope = reactor.get(node.iterator, "scope");
+        Type type = reactor.get(node.iterator, "type");
+        String name = node.iterator.name;
+        // declare&init iterator
+        get(node.iterator);
+
+        while (!(boolean) get(node.condition)){
+            // execute body
+            get(node.body);
+            // update the iterator
+            Object rvalue = get(node.iterationRule);
+            assign(scope, name, rvalue, type);
+        }
+        return null;
+    }
+
+    // ---------------------------------------------------------------------------------------------
+
+    private Void forEachVarDecl (ForEachVarNode node)
+    {
+        // no need to do anything, the variable is assigned during the first iteration of ForEach
+        return null;
+    }
+
+
+    // ---------------------------------------------------------------------------------------------
+
+    private Void forEachStmt (ForEachNode node)
+    {
+        Scope scope = reactor.get(node.iterator, "scope");
+        Type type = reactor.get(node.iterator, "type");
+        String name = node.iterator.name;
+        Object[] array = getNonNullArray(node.iterated);
+
+        if(array.length == 0)
+            throw new PassthroughException(new IndexOutOfBoundsException("Cannot iterate over empty array"));
+
+        if(node.iterator.type instanceof ArrayTypeNode)
+            checkLength((ArrayTypeNode) node.iterator.type, array[0]);
+
+        for (Object rvalue : array) {
+            // assign iterator = iterated[iter]
+            assign(scope, name, rvalue, type);
+            // execute body
+            get(node.body);
+        }
+        return null;
+    }
+
+
+    // ---------------------------------------------------------------------------------------------
+
     private Object reference (ReferenceNode node)
     {
         Scope scope = reactor.get(node, "scope");
@@ -494,6 +760,7 @@ public final class Interpreter
 
         if (decl instanceof VarDeclarationNode
         || decl instanceof ParameterNode
+        || decl instanceof ForEachVarNode
         || decl instanceof SyntheticDeclarationNode
                 && ((SyntheticDeclarationNode) decl).kind() == DeclarationKind.VARIABLE)
             return scope == rootScope
@@ -506,7 +773,11 @@ public final class Interpreter
     // ---------------------------------------------------------------------------------------------
 
     private Void returnStmt (ReturnNode node) {
-        throw new Return(node.expression == null ? null : get(node.expression));
+        Object rvalue = node.expression == null ? null : get(node.expression);
+        TypeNode type = reactor.get(node, "type"); // root function has no type = null
+        if (type instanceof ArrayTypeNode)
+            checkLength((ArrayTypeNode) type, rvalue);
+        throw new Return(rvalue);
     }
 
     // ---------------------------------------------------------------------------------------------
@@ -514,8 +785,36 @@ public final class Interpreter
     private Void varDecl (VarDeclarationNode node)
     {
         Scope scope = reactor.get(node, "scope");
-        assign(scope, node.name, get(node.initializer), reactor.get(node, "type"));
+        Object initializer = get(node.initializer);
+        TypeNode type = node.type;
+        if(type instanceof ArrayTypeNode)
+            checkLength((ArrayTypeNode) type, initializer);
+        assign(scope, node.name, initializer, reactor.get(node, "type"));
         return null;
+    }
+
+    private void checkLength(ArrayTypeNode type, Object value)
+    {
+        if(value != null && !(value instanceof Null)) {
+            Object[] array = (Object[]) value;
+            if (type.lengthHint != null) {
+                long lengthHint = get(type.lengthHint);
+                if (lengthHint <= 0)
+                    throw new PassthroughException(new AssertionError("Length hinting cannot be expresses with zero or negatif value, got " + lengthHint));
+                long arrayLength = array.length;
+                if (lengthHint != arrayLength)
+                    throw new PassthroughException(new AssertionError(format("Incorrect array length provided, expected size %d but got size %d", lengthHint, arrayLength)));
+            }
+            if(type.componentType instanceof ArrayTypeNode)
+                if(array.length > 0 && array[0] instanceof Object[])
+                    checkLength((ArrayTypeNode) type.componentType, array[0]);
+                else
+                    checkLength((ArrayTypeNode) type.componentType, null);
+
+            return;
+        }
+        if (type.lengthHint != null)
+            throw new PassthroughException(new NullPointerException("No target array found for length check"));
     }
 
     // ---------------------------------------------------------------------------------------------

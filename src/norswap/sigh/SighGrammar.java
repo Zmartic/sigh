@@ -58,6 +58,10 @@ public class SighGrammar extends Grammar
     public rule _if             = reserved("if");
     public rule _else           = reserved("else");
     public rule _while          = reserved("while");
+    public rule _for            = reserved("for"); //new
+    public rule _in             = reserved("in"); //new
+    public rule _do             = reserved("do"); //new
+    public rule _until          = reserved("until"); //new
     public rule _return         = reserved("return");
 
     public rule number =
@@ -169,8 +173,13 @@ public class SighGrammar extends Grammar
         .infix(add_op,
             $ -> new BinaryExpressionNode($.span(), $.$[0], $.$[1], $.$[2]));
 
-    public rule order_expr = left_expression()
+    // new
+    public rule range_expr = left_expression()
         .operand(add_expr)
+        .infix(COLON,
+            $ -> new RangeExpressionNode($.span(), $.$[0], $.$[1]));
+    public rule order_expr = left_expression()
+        .operand(range_expr)
         .infix(cmp_op,
             $ -> new BinaryExpressionNode($.span(), $.$[0], $.$[1], $.$[2]));
 
@@ -191,7 +200,6 @@ public class SighGrammar extends Grammar
 
     public rule expression =
         seq(assignment_expression);
-
     public rule expression_stmt =
         expression
         .filter($ -> {
@@ -203,8 +211,8 @@ public class SighGrammar extends Grammar
 
     public rule array_type = left_expression()
         .left(simple_type)
-        .suffix(seq(LSQUARE, RSQUARE),
-            $ -> new ArrayTypeNode($.span(), $.$[0]));
+        .suffix(seq(LSQUARE, expression.or_push_null(), RSQUARE),
+            $ -> new ArrayTypeNode($.span(), $.$[0], $.$[1]));
 
     public rule type =
         seq(array_type);
@@ -216,6 +224,7 @@ public class SighGrammar extends Grammar
         this.struct_decl,
         this.if_stmt,
         this.while_stmt,
+        this.for_stmt, // new
         this.return_stmt,
         this.expression_stmt));
 
@@ -264,6 +273,25 @@ public class SighGrammar extends Grammar
     public rule while_stmt =
         seq(_while, expression, statement)
         .push($ -> new WhileNode($.span(), $.$[0], $.$[1]));
+
+    // new
+    public rule for_simple =
+        seq(var_decl, _do, expression, seq(_until, expression).or_push_null(), statement)
+        .push($ -> new ForNode($.span(), $.$[0], $.$[1], $.$[2], $.$[3]));
+
+    // new
+    public rule for_each_var_decl =
+        seq(identifier, COLON, type)
+        .push($ -> new ForEachVarNode($.span(), $.$[0], $.$[1]));
+
+    // new
+    public rule for_each =
+        seq(for_each_var_decl, _in, expression, statement)
+        .push($ -> new ForEachNode($.span(), $.$[0], $.$[1], $.$[2]));
+
+    // new
+    public rule for_stmt =
+        seq(_for, choice(for_simple, for_each));
 
     public rule return_stmt =
         seq(_return, expression.or_push_null())
