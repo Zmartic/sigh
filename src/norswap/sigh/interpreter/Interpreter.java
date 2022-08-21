@@ -214,6 +214,19 @@ public final class Interpreter
         if (numeric)
             return numericOp(node, floating, (Number) left, (Number) right);
 
+        // -- EQ & NEQ for array --
+        if(leftType instanceof ArrayType && rightType instanceof ArrayType) {
+            Object[] arrayLeft  = (Object[]) left;
+            Object[] arrayRight = (Object[]) right;
+            switch (node.operator) {
+                case EQUALITY:
+                    return Arrays.equals(arrayLeft,arrayRight);
+                case NOT_EQUALS:
+                    return !Arrays.equals(arrayLeft,arrayRight);
+            }
+        }
+
+
         switch (node.operator) {
             case EQUALITY:
                 return  leftType.isPrimitive() ? left.equals(right) : left == right;
@@ -251,7 +264,7 @@ public final class Interpreter
             Object[] l = (Object[]) left;
             Object[] r = (Object[]) right;
             if(l.length != r.length)
-                throw new PassthroughException(new AssertionError(
+                throw new PassthroughException(new LengthException(
                     format("Attempt to perform operation between incompatible arrays respectively of size %d and %d",l.length,r.length)));
             if(l.length == 0)
                 throw new PassthroughException(new ArithmeticException("Attempting to perform an operation using empty arrays"));
@@ -438,7 +451,7 @@ public final class Interpreter
                 throw new PassthroughException(new NullPointerException(
                     "empty array access cannot be assigned"));
             if(indexes.length != right.length)
-                throw new PassthroughException(new ArrayIndexOutOfBoundsException(
+                throw new PassthroughException(new LengthException(
                     format("Trying to assign an array of size %d to an array access of size %d",
                            indexes.length, right.length)));
 

@@ -318,6 +318,21 @@ public final class SemanticAnalysisTests extends UraniumTestFixture
         successInput("var i: Int[] = [1,2,3] * [1,2,3]");
         successInput("var i: Int[] = [1,2,3] / [1,2,3]");
 
+        successInput("var i: Bool[] = [1,2,3] >  1");
+        successInput("var i: Bool[] = [1,2,3] <  1");
+        successInput("var i: Bool[] = [1,2,3] >= 1");
+        successInput("var i: Bool[] = [1,2,3] <= 1");
+
+        successInput("var i: Bool[] = 1 >  [1,2,3]");
+        successInput("var i: Bool[] = 1 <  [1,2,3]");
+        successInput("var i: Bool[] = 1 >= [1,2,3]");
+        successInput("var i: Bool[] = 1 <= [1,2,3]");
+
+        successInput("var i: Bool[] = [1,2,3] > [1,2,3]");
+        successInput("var i: Bool[] = [1,2,3] < [1,2,3]");
+        successInput("var i: Bool[] = [1,2,3] >= [1,2,3]");
+        successInput("var i: Bool[] = [1,2,3] <= [1,2,3]");
+
         successInput("var i: Int[][] = [[1,1],[2,2],[3,3]] + 1");
         successInput("var i: Int[][] = [[1,1],[2,2],[3,3]] + [1,0,1]");// result = [[2,2],[0,0],[4,4]]
 
@@ -326,6 +341,8 @@ public final class SemanticAnalysisTests extends UraniumTestFixture
         successInput("var i: String = [1,2,3] + \"h\"");
         failureInputWith("var i: String[] = [\"hello\",\"world\"] + 1",
             "Trying to add String[] with Int");
+
+        successInput("return [1,2,3] == [1,2,3];");
     }
 
     @Test public void testForStmt()
@@ -354,10 +371,8 @@ public final class SemanticAnalysisTests extends UraniumTestFixture
     @Test public void testRangeExpr()
     {
         successInput("var a: Int[] = [0,0,0,0] ; a[1:3] = [1,1] * 5 ;");
-        // todo: don't allow a[1:3][0]
 
         successInput("var a: Int[] = [1,2,3,4] ; var b: Int[] = a[0:2] + b[2:4] ;");
-        successInput("var a: Int[] = [1,2,3,4] ; var reverse_a: Int[] = a[-1:0] ;"); // TODO nop
         successInput("var a: Int[] = [1,2,3,4] ; var empty_a: Int[] = a[1:1] ;");
 
         successInput("var a: Int[] = 0 : 10 ;");

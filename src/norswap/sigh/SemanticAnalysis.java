@@ -593,12 +593,38 @@ public final class SemanticAnalysis
 
     private void binaryComparison (Rule r, BinaryExpressionNode node, Type left, Type right)
     {
-        r.set(0, BoolType.INSTANCE);
+        // -- compute innermost type for left & right --
+        // --      and compute type of the node       --
+        Type leftC = left;
+        Type rightC = right;
+        if(left instanceof ArrayType) {
+            ArrayType leftA = (ArrayType) left;
+            leftC = leftA.innerMostType;
+            if (right instanceof ArrayType) {
+                ArrayType rightA = (ArrayType) right;
+                rightC = rightA.innerMostType;
+                Type type = createArrayType(Math.max(leftA.dimension,rightA.dimension), BoolType.INSTANCE);
+                r.set(0, type);
+            }
+            else {
+                Type type = createArrayType(leftA.dimension, BoolType.INSTANCE);
+                r.set(0, type);
+            }
+        }
+        else if (right instanceof ArrayType) {
+            ArrayType rightA = (ArrayType) right;
+            rightC = rightA.innerMostType;
+            Type type = createArrayType(rightA.dimension, BoolType.INSTANCE);
+            r.set(0, type);
+        }
+        else
+            r.set(0, BoolType.INSTANCE);
 
-        if (!(left instanceof IntType) && !(left instanceof FloatType))
+        // -- check type concistency --
+        if (!(leftC instanceof IntType) && !(leftC instanceof FloatType))
             r.errorFor("Attempting to perform arithmetic comparison on non-numeric type: " + left,
                 node.left);
-        if (!(right instanceof IntType) && !(right instanceof FloatType))
+        if (!(rightC instanceof IntType) && !(rightC instanceof FloatType))
             r.errorFor("Attempting to perform arithmetic comparison on non-numeric type: " + right,
                 node.right);
     }

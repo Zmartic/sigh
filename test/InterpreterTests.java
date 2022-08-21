@@ -7,6 +7,7 @@ import norswap.sigh.SemanticAnalysis;
 import norswap.sigh.SighGrammar;
 import norswap.sigh.ast.SighNode;
 import norswap.sigh.interpreter.Interpreter;
+import norswap.sigh.interpreter.LengthException;
 import norswap.sigh.interpreter.Null;
 import norswap.uranium.Reactor;
 import norswap.uranium.SemanticError;
@@ -187,7 +188,7 @@ public final class InterpreterTests extends TestFixture {
         checkExpr("false == false", true);
         checkExpr("true == false", false);
         checkExpr("1 == 1.0", true);
-        checkExpr("[1] == [1]", false);
+        checkExpr("[1] == [1]", true);
 
         checkExpr("1 != 1", false);
         checkExpr("1 != 2", true);
@@ -199,7 +200,7 @@ public final class InterpreterTests extends TestFixture {
         checkExpr("1 != 1.0", false);
 
         checkExpr("\"hi\" != \"hi2\"", true);
-        checkExpr("[1] != [1]", true);
+        checkExpr("[1] != [1]", false);
 
          // test short circuit
         checkExpr("true || print(\"x\") == \"y\"", true, "");
@@ -365,6 +366,7 @@ public final class InterpreterTests extends TestFixture {
         rule = grammar.root;
         check("print((0:5) + \"\" );", null,"[0, 1, 2, 3, 4]\n");
         check("print((2:6) + \"\" );", null,"[2, 3, 4, 5]\n");
+        check("print((-2:2) + \"\" );", null,"[-2, -1, 0, 1]\n");
         check("print((2:2) + \"\" );", null,"[]\n");
         check("print((6:2) + \"\" );", null,"[]\n");
     }
@@ -379,10 +381,10 @@ public final class InterpreterTests extends TestFixture {
         check("var a: Int[] = [0,0,0,0,0]; a[1:4] = [1,2,3]; print(a+\"\");", null,"[0, 1, 2, 3, 0]\n");
         checkThrows("var a: Int[] = [0,0,0,0,0];" +
                     "a[1:4] = [1];", // incompatible length
-                    ArrayIndexOutOfBoundsException.class);
+                    LengthException.class);
         checkThrows("var a: Int[] = [0,0,0,0,0];" +
                     "a[1:2] = [1,2,3,4,5];", // incompatible length,
-                    ArrayIndexOutOfBoundsException.class);
+                    LengthException.class);
         checkThrows("var a: Int[] = [0,0,0,0,0];" +
                     "a[1:1] = [];", // a[1:1] = empty selection = cannot be assigned
                     NullPointerException.class);
@@ -393,15 +395,25 @@ public final class InterpreterTests extends TestFixture {
     @Test public void testArrayBinary()
     {
         rule = grammar.root;
-        check("var a: Int[]   = [1,2,3];        var b: Int[]   = [1,1,2];       var c: Int[]   = a + b; print(c + \"\");",null,"[2, 3, 5]\n");
-        check("var a: Int[]   = [1,2,3];        var b: Float[] = [1.0,1.0,2.0]; var c: Float[] = a + b; print(c + \"\");",null,"[2.0, 3.0, 5.0]\n");
-        check("var a: Float[] = [1.0,2.0,3.0];  var b: Int[]   = [1,1,2];       var c: Float[] = a + b; print(c + \"\");",null,"[2.0, 3.0, 5.0]\n");
-        check("var a: Float[] = [1.0,2.0,3.0];  var b: Float[] = [1.0,1.0,2.0]; var c: Float[] = a + b; print(c + \"\");",null,"[2.0, 3.0, 5.0]\n");
+        check("var a: Int[]   = [1,2,3];       var b: Int[]   = [1,1,2];       var c: Int[]   = a + b; print(c + \"\");",null,"[2, 3, 5]\n");
+        check("var a: Int[]   = [1,2,3];       var b: Float[] = [1.0,1.0,2.0]; var c: Float[] = a + b; print(c + \"\");",null,"[2.0, 3.0, 5.0]\n");
+        check("var a: Float[] = [1.0,2.0,3.0]; var b: Int[]   = [1,1,2];       var c: Float[] = a + b; print(c + \"\");",null,"[2.0, 3.0, 5.0]\n");
+        check("var a: Float[] = [1.0,2.0,3.0]; var b: Float[] = [1.0,1.0,2.0]; var c: Float[] = a + b; print(c + \"\");",null,"[2.0, 3.0, 5.0]\n");
 
         check("var a: Int[]   = [1,2,3];       var b: Int[]   = a + 1;   print(b +\"\");",null,"[2, 3, 4]\n");
         check("var a: Int[]   = [1,2,3];       var b: Float[] = a + 1.0; print(b +\"\");",null,"[2.0, 3.0, 4.0]\n");
         check("var a: Float[] = [1.0,2.0,3.0]; var b: Float[] = a + 1;   print(b +\"\");",null,"[2.0, 3.0, 4.0]\n");
         check("var a: Float[] = [1.0,2.0,3.0]; var b: Float[] = a + 1.0; print(b +\"\");",null,"[2.0, 3.0, 4.0]\n");
+
+        check("var a: Int[]   = [1,2,3]; var b: Int[]   = [0,2,4]; var c: Bool[]  = a >  b; print(c + \"\");",null,"[true, false, false]\n");
+        check("var a: Int[]   = [1,2,3]; var b: Int[]   = [0,2,4]; var c: Bool[]  = a <  b; print(c + \"\");",null,"[false, false, true]\n");
+        check("var a: Int[]   = [1,2,3]; var b: Int[]   = [0,2,4]; var c: Bool[]  = a >= b; print(c + \"\");",null,"[true, true, false]\n");
+        check("var a: Int[]   = [1,2,3]; var b: Int[]   = [0,2,4]; var c: Bool[]  = a <= b; print(c + \"\");",null,"[false, true, true]\n");
+
+        check("var a: Int[]   = [1,2,3]; var c: Bool[]  = a >  2; print(c + \"\");",null,"[false, false, true]\n");
+        check("var a: Int[]   = [1,2,3]; var c: Bool[]  = a <  2; print(c + \"\");",null,"[true, false, false]\n");
+        check("var a: Int[]   = [1,2,3]; var c: Bool[]  = a >= 2; print(c + \"\");",null,"[false, true, true]\n");
+        check("var a: Int[]   = [1,2,3]; var c: Bool[]  = a <= 2; print(c + \"\");",null,"[true, true, false]\n");
 
         check("var a: Int[]   = [1,2,3]; var b: Int[] = a[0:2] + a[1:3]; print(b +\"\");",null,"[3, 5]\n");
 
@@ -413,11 +425,11 @@ public final class InterpreterTests extends TestFixture {
         checkThrows("var a: Int[] = [1,2,3];" +
                     "var b: Int[] = [1,2];" +
                     "var c: Int[] = a + b;", // incompatible length
-                    AssertionError.class);
+                    LengthException.class);
         checkThrows("var a: Int[][] = [[1,2,3],[4,5,6],[7,8,9]];" +
                     "var b: Int[][] = [[1],[1],[1]];" +
-                    "var c: Int[] = a + b;", // incompatible length
-                    AssertionError.class);
+                    "var c: Int[][] = a + b;", // incompatible length
+                    LengthException.class);
 
         checkThrows("var a: Int[] = [] + []", ArithmeticException.class);
         checkThrows("var a: Int[] = [] + 1", ArithmeticException.class);
@@ -425,6 +437,10 @@ public final class InterpreterTests extends TestFixture {
 
         checkThrows("var a: Int[][] = [[]]", AssertionError.class); // bug from Sigh: expected Int[][] but got Int[][][]
 
+        check("return [1,2,3] == [1,2,3];", true);
+        check("return [1,2,3] == [3,2,1];", false);
+        check("return [1,2,3] != [1,2,3];", false);
+        check("return [1,2,3] != [3,2,1];", true);
     }
 
     // ---------------------------------------------------------------------------------------------
@@ -449,10 +465,12 @@ public final class InterpreterTests extends TestFixture {
         check("fun f(x:Int[3]): Int { return x[1] } ; return f([1,2,3])",2L);
         checkThrows("fun f(x:Int[3]): Int { return x[1] } ; return f([1,2,3,4])",AssertionError.class);
         checkThrows("fun f(x:Int[3]): Int { return x[1] } ; return f([])",AssertionError.class);
+        check("fun f(i:Int, x:Int[i]): Int { return x[i-1] } ; return f(3,[1,2,3])",3L);
 
         check("fun f(x:Int[]): Int[2] { return x } ; print( f([1,2]) + \"\" );", null, "[1, 2]\n");
         checkThrows("fun f(x:Int[]): Int[2] { return x } ; return f([1,2,3]);", AssertionError.class);
         checkThrows("fun f(x:Int[]): Int[2] { return x } ; return f([]);", AssertionError.class);
+        check("fun f(i:Int, x:Int[]): Int[i] { return x } ; print( f(2,[1,2]) + \"\" );", null, "[1, 2]\n");
 
         check("var ii: Int[][] = [[1],[2],[3]]; for i:Int[1] in ii { print(i + \"\"); }", null, "[1]\n[2]\n[3]\n");
         checkThrows("var ii: Int[][] = [[1],[2],[3]]; for i:Int[12] in ii { print(i + \"\"); }", AssertionError.class);
